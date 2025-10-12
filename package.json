@@ -1,5 +1,5 @@
 {
-  "name": "apostrophe-astro-static",
+  "name": "apostrophecms-astro-static",
   "version": "1.0.0",
   "description": "Static site generator for ApostropheCMS + Astro sites with automatic pagination, filtering, and video widget processing",
   "main": "src/index.js",
@@ -26,7 +26,7 @@
   "author": "",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "jsdom": "^24.0.0"
@@ -36,10 +36,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/apostrophe-astro-static.git"
+    "url": "https://github.com/BoDonkey/apostrophecms-astro-static.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/apostrophe-astro-static/issues"
+    "url": "https://github.com/BoDonkey/apostrophecms-astro-static/issues"
   },
-  "homepage": "https://github.com/yourusername/apostrophe-astro-static#readme"
+  "homepage": "https://github.com/BoDonkey/apostrophecms-astro-static#readme"
 }
