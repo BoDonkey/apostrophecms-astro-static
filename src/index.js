@@ -122,13 +122,15 @@ export async function exportStatic(options = {}) {
 
     if (localeConfig) {
       for (const [locale, config] of Object.entries(localeConfig)) {
-        const urls = await generateSitemap({ 
+        const urls = await generateSitemap({
           aposHost,
           aposKey,
           locale,
           pieceTypes
         });
 
+        // Warn if configured prefix doesn't match what Apostrophe actually emits
+        validateLocalePrefix(urls, config.prefix, locale);
         // Apply locale prefix if configured
         const prefixedUrls = applyLocalePrefix(urls, config.prefix);
         allUrls.push(...prefixedUrls);
@@ -252,6 +254,33 @@ export async function exportStatic(options = {}) {
     shutdown();
   }
 }
+
+function validateLocalePrefix(urls, localePrefix, locale) {
+  if (!localePrefix || !Array.isArray(urls) || urls.length === 0) return;
+
+  // Normalize "/de/" -> "de"
+  const norm = String(localePrefix).replace(/^\/+|\/+$/g, '');
+  const expected = `/${norm}/`;
+
+  // Do we see *any* URL under the configured prefix?
+  const anyUnderPrefix = urls.some(u => u === expected || u.startsWith(expected));
+  if (anyUnderPrefix) return;
+
+  // Guess the most common first path segment from discovered URLs
+  const firstSegFreq = new Map();
+  for (const u of urls) {
+    const seg = String(u).replace(/^\//, '').split('/')[0] || '';
+    if (!seg) continue;
+    firstSegFreq.set(seg, (firstSegFreq.get(seg) || 0) + 1);
+  }
+  const guess = [...firstSegFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+  console.warn(
+    `⚠️ Locale prefix mismatch for "${locale}": configured "${localePrefix}", ` +
+    `but sitemap URLs don’t appear under that path${guess ? ` (common segment observed: "/${guess}")` : ''}.`
+  );
+}
+
 
 function applyLocalePrefix(urls, localePrefix) {
   if (!localePrefix) return urls;
