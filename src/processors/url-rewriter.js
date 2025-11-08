@@ -10,7 +10,7 @@
 import { JSDOM } from 'jsdom';
 import { queryParamsToPath } from '../utils.js';
 
-export function extractInternalLinks(html, baseUrl) {
+export function extractInternalLinks(html, baseUrl, hostAllowlist = new Set()) {
   const dom = new JSDOM(html);
   const document = dom.window.document;
   const links = new Set();
@@ -21,9 +21,10 @@ export function extractInternalLinks(html, baseUrl) {
     if (!href) continue;
 
     try {
-      const url = new URL(href, baseUrl);
-
-      if (url.origin === new URL(baseUrl).origin) {
+      const base = new URL(baseUrl);
+      const url = new URL(href, base);
+      // Treat as internal if same-origin OR in the allowlist (multi-host locales)
+      if (url.origin === base.origin || hostAllowlist.has(url.host)) {
         const pathWithoutHash = url.pathname + url.search;
         if (pathWithoutHash) {
           links.add(pathWithoutHash);
@@ -37,7 +38,7 @@ export function extractInternalLinks(html, baseUrl) {
   return Array.from(links);
 }
 
-export function makeUrlsRelative(html, previewUrl) {
+export function makeUrlsRelative(html, previewUrl, hostAllowlist = new Set()) {
   const dom = new JSDOM(html);
   const document = dom.window.document;
 
@@ -51,10 +52,10 @@ export function makeUrlsRelative(html, previewUrl) {
 
     try {
       let finalUrl = url;
-
-      if (url.startsWith(previewUrl)) {
-        const urlObj = new URL(url);
-        finalUrl = urlObj.pathname + urlObj.search + urlObj.hash;
+      const base = new URL(previewUrl);
+      const u = new URL(url, base);
+      if (u.origin === base.origin || hostAllowlist.has(u.host)) {
+        finalUrl = u.pathname + u.search + u.hash;
       }
 
       if (finalUrl.includes('?')) {

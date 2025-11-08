@@ -61,12 +61,7 @@ async function fetchAllPages(aposHost, headers, locale = null) {
     }
   }
 
-  if (locale) {
-    const expectedHomepage = `/${locale}/`;
-    if (!urls.includes(expectedHomepage) && !urls.includes("/")) {
-      urls.push("/");
-    }
-  } else {
+  if (!locale) {
     if (!urls.includes("/")) {
       urls.push("/");
     }

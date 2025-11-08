@@ -36,7 +36,6 @@ import {
  * @param {number} [options.concurrency] - Max concurrent fetches (default: CPU count, max 8)
  * @param {number} [options.retries=3] - Number of retries for failed fetches
  * @param {string[]} [options.pieceTypes] - Optional: specific piece types to include
- * @param {Object} [options.localeConfig] - Multi-locale configuration
  * @param {boolean|string} [options.downloadUploads=false] - Upload handling:
  *   - false (default): Leave URLs pointing to original S3/CDN (recommended for production)
  *   - 'copy-only': Copy from local filesystem only (monorepo setups)
@@ -54,8 +53,7 @@ export async function exportStatic(options = {}) {
     concurrency = Math.min(8, Math.max(2, os.cpus().length)),
     retries = 3,
     pieceTypes,
-    localeConfig,
-    onProgress = () => {}
+    onProgress = () => { }
   } = options;
 
   if (!aposHost) {
@@ -88,8 +86,8 @@ export async function exportStatic(options = {}) {
   onProgress(10, 100, 'Starting preview server...');
 
   const astroProcess = spawn(
-    "npm", 
-    ["run", "preview", "--", "--host", host, "--port", String(port)], 
+    "npm",
+    ["run", "preview", "--", "--host", host, "--port", String(port)],
     {
       stdio: ["ignore", "inherit", "inherit"],
       detached: process.platform !== "win32"
@@ -106,7 +104,7 @@ export async function exportStatic(options = {}) {
         } catch {
           try {
             astroProcess.kill("SIGTERM");
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -118,26 +116,34 @@ export async function exportStatic(options = {}) {
 
     onProgress(25, 100, 'Generating sitemap...');
 
+    // Prefer Apostrophe as source of truth for locales
+    const locales = await discoverLocales(aposHost, aposKey).catch(() => []);
     let allUrls = [];
+    const internalHostAllowlist = new Set();
+    internalHostAllowlist.add(new URL(previewUrl).host);
 
-    if (localeConfig) {
-      for (const [locale, config] of Object.entries(localeConfig)) {
+    if (locales.length > 0) {
+      for (const loc of locales) {
+        if (loc.host) internalHostAllowlist.add(loc.host);
         const urls = await generateSitemap({
           aposHost,
           aposKey,
-          locale,
+          locale: loc.name,
           pieceTypes
         });
-
-        // Warn if configured prefix doesn't match what Apostrophe actually emits
-        validateLocalePrefix(urls, config.prefix, locale);
-        // Apply locale prefix if configured
-        const prefixedUrls = applyLocalePrefix(urls, config.prefix);
-        allUrls.push(...prefixedUrls);
+        allUrls.push(...urls);
       }
-
+      allUrls = Array.from(new Set(allUrls)).sort();
+    } else if (localeConfig) {
+      // Back-compat: existing config path
+      for (const [locale, config] of Object.entries(localeConfig)) {
+        const urls = await generateSitemap({ aposHost, aposKey, locale, pieceTypes });
+        allUrls.push(...urls); // no manual prefixing; Apostrophe returns locale-correct _url
+        if (config.host) internalHostAllowlist.add(new URL(config.host).host);
+      }
       allUrls = Array.from(new Set(allUrls)).sort();
     } else {
+      // Single locale fallback
       allUrls = await generateSitemap({ aposHost, aposKey, pieceTypes });
     }
 
@@ -179,8 +185,8 @@ export async function exportStatic(options = {}) {
           const response = await fetchWithRetry(pageUrl, {}, 60000, retries);
           let html = await response.text();
 
-          // Extract internal links
-          const foundLinks = extractInternalLinks(html, previewUrl);
+          // Extract internal links (allowlist supports multi-host locales)
+          const foundLinks = extractInternalLinks(html, previewUrl, internalHostAllowlist);
           for (const link of foundLinks) {
             if (!processedUrls.has(link) && !urlQueue.includes(link)) {
               urlQueue.push(link);
@@ -195,7 +201,7 @@ export async function exportStatic(options = {}) {
           }
 
           // Rewrite URLs
-          html = makeUrlsRelative(html, previewUrl);
+          html = makeUrlsRelative(html, previewUrl, internalHostAllowlist);
 
           writeHtmlForPath(resolvedOutputDir, urlPath, html);
           processedUrls.add(urlPath);
@@ -237,7 +243,7 @@ export async function exportStatic(options = {}) {
       const notFoundPath = path.join(resolvedOutputDir, "404.html");
       if (!fs.existsSync(notFoundPath)) {
         fs.writeFileSync(
-          notFoundPath, 
+          notFoundPath,
           "<!doctype html><meta charset='utf-8'><title>Not found</title><h1>404</h1>"
         );
       }
@@ -255,46 +261,19 @@ export async function exportStatic(options = {}) {
   }
 }
 
-function validateLocalePrefix(urls, localePrefix, locale) {
-  if (!localePrefix || !Array.isArray(urls) || urls.length === 0) return;
-
-  // Normalize "/de/" -> "de"
-  const norm = String(localePrefix).replace(/^\/+|\/+$/g, '');
-  const expected = `/${norm}/`;
-
-  // Do we see *any* URL under the configured prefix?
-  const anyUnderPrefix = urls.some(u => u === expected || u.startsWith(expected));
-  if (anyUnderPrefix) return;
-
-  // Guess the most common first path segment from discovered URLs
-  const firstSegFreq = new Map();
-  for (const u of urls) {
-    const seg = String(u).replace(/^\//, '').split('/')[0] || '';
-    if (!seg) continue;
-    firstSegFreq.set(seg, (firstSegFreq.get(seg) || 0) + 1);
-  }
-  const guess = [...firstSegFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-
-  console.warn(
-    `⚠️ Locale prefix mismatch for "${locale}": configured "${localePrefix}", ` +
-    `but sitemap URLs don’t appear under that path${guess ? ` (common segment observed: "/${guess}")` : ''}.`
-  );
-}
-
-
-function applyLocalePrefix(urls, localePrefix) {
-  if (!localePrefix) return urls;
-
-  return urls.map(url => {
-    if (url.startsWith(localePrefix + '/') || url === localePrefix) {
-      return url;
-    }
-
-    if (url === '/') {
-      return localePrefix + '/';
-    }
-
-    return localePrefix + url;
+async function discoverLocales(aposHost, aposKey) {
+  const url = new URL('/api/v1/@apostrophecms/i18n/locales', aposHost).toString();
+  const res = await fetchWithRetry(url, {
+    headers: { 'APOS-EXTERNAL-FRONT-KEY': aposKey }
+  }, 15000, 2);
+  if (!res.ok) throw new Error(`Locales request failed: ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) return [];
+  return data.map(raw => {
+    const name = raw.name || raw.locale || raw.slug || raw.id || 'default';
+    // Some projects also expose hostname/domain per locale
+    const host = raw.hostname || raw.host || raw.domain || null;
+    return { name, host };
   });
 }
 
