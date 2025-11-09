@@ -134,9 +134,9 @@ export async function exportStatic(options = {}) {
         allUrls.push(...urls);
       }
       allUrls = Array.from(new Set(allUrls)).sort();
-    } else if (localeConfig) {
+    } else if (options.localeConfig) {
       // Back-compat: existing config path
-      for (const [locale, config] of Object.entries(localeConfig)) {
+      for (const [locale, config] of Object.entries(options.localeConfig)) {
         const urls = await generateSitemap({ aposHost, aposKey, locale, pieceTypes });
         allUrls.push(...urls); // no manual prefixing; Apostrophe returns locale-correct _url
         if (config.host) internalHostAllowlist.add(new URL(config.host).host);
