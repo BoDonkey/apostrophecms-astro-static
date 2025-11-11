@@ -171,6 +171,48 @@ async function fetchAllPieces(aposHost, headers, pieceType, locale = null) {
   return urls;
 }
 
+async function discoverIndexPageVariations(aposHost, aposKey, pageUrl, locale = null) {
+  const variations = [pageUrl];
+  try {
+    let fetchUrl = `${aposHost}${pageUrl}`;
+    if (locale) fetchUrl += (fetchUrl.includes('?') ? '&' : '?') + `aposLocale=${locale}`;
+    const res = await fetchWithTimeout(fetchUrl, { headers: { 'APOS-EXTERNAL-FRONT-KEY': aposKey } });
+    if (!res.ok) return variations;
+    const html = await res.text();
+
+    const m = html.match(/window\.apos\s*=\s*({[\s\S]*?});/);
+    if (!m) return variations;
+    let aposData; try { aposData = JSON.parse(m[1]); } catch { return variations; }
+
+    const totalPages = aposData?.page?.totalPages || aposData?.totalPages || 1;
+    const filters = aposData?.page?.piecesFilters || aposData?.piecesFilters || [];
+
+    for (let p = 2; p <= totalPages; p++) variations.push(`${pageUrl}?page=${p}`);
+
+    for (const f of filters) {
+      if (!f?.value) continue;
+      const u = new URL(f.url, 'http://dummy');
+      const q = u.searchParams.toString();
+      if (q) variations.push(`${pageUrl}?${q}`);
+    }
+  } catch {}
+  return Array.from(new Set(variations));
+}
+
+async function discoverAllIndexVariations(aposHost, aposKey, urls, locale = null) {
+  const out = [];
+  for (const u of urls) {
+    const likelyIndex = u.match(/^\/[\w-]+\/$/) || u === '/';
+    if (likelyIndex && u !== '/') {
+      out.push(...(await discoverIndexPageVariations(aposHost, aposKey, u, locale)));
+    } else {
+      out.push(u);
+    }
+  }
+  return Array.from(new Set(out));
+}
+
+
 export async function generateSitemap(options = {}) {
   const {
     aposHost,
@@ -199,5 +241,6 @@ export async function generateSitemap(options = {}) {
   }
 
   const allUrls = Array.from(new Set([...pageUrls, ...pieceUrls])).sort();
+  allUrls = await discoverAllIndexVariations(aposHost, aposKey, allUrls, locale);
   return allUrls;
 }
