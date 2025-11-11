@@ -240,7 +240,7 @@ export async function generateSitemap(options = {}) {
     pieceUrls.push(...urls);
   }
 
-  const allUrls = Array.from(new Set([...pageUrls, ...pieceUrls])).sort();
+  let allUrls = Array.from(new Set([...pageUrls, ...pieceUrls])).sort();
   allUrls = await discoverAllIndexVariations(aposHost, aposKey, allUrls, locale);
   return allUrls;
 }
